@@ -1,0 +1,468 @@
+---
+title: "Airbnb in Singapore: Find Your Ideal Place"
+author: "Jingyi Chen, Marina Chen, Xiaoxuan Liu, BST 260"
+date: "12/14/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE, warning=FALSE, message=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(Hmisc)
+library(tidyverse)
+library(shiny)
+library(ggthemes)
+library(dslabs)
+library(gridExtra)
+library(dplyr)
+library(ggplot2)
+library(lubridate)
+library(data.table)
+library(ggrepel)
+library(png)
+library(scales)
+library(arsenal)
+library(RColorBrewer)
+library(readr)
+library(httr)
+library(magick)
+library(caret)
+library(xgboost)
+library(DMwR)
+library(magrittr)
+library(Matrix)
+```
+
+### Project Overview
+
+#### **_Background & Motivation_**
+
+Airbnb, Inc. is an online marketplace for arranging or offering lodging, primarily homestays, or tourism experiences. It has been growing dramatically since its inception in 2008 with the number of rentals listed on its website growing exponentially each year. It currently covers more than 81,000 cities and 191 countries worldwide. Airbnb has successfully disrupted the traditional hospitality industry as more and more travelers resort to Airbnb as their priority accommodation provider. Singapore has been one of the hottest markets for Airbnb, especially in Asia. There were estimated 7,000 Singapore property listings on Airbnb as of November 2016. An Singapore host can also earn an average of $5,000 a year from listing their property on Airbnb. One possible attribute of the success of Airbnb in Singapore is that tourism is a major industry and contributor to the Singaporean economy, and now more tourists prefer homestays rather than hotel rooms to experience local culture and lifestyle. We are therefore interested in understanding the Airbnb rental landscape in Singapore from customers’ decision-making perspective. We conducted an exploratory analysis of Singapore Airbnb open data leveraging various static and interactive visualization tools. We also provided a forecasting of future Airbnb market in Singapore.
+
+#### **_Objectives_**
+
+This shiny app is designed to provide customers with information additional to filters on Airbnb website to help them decide where to live and potential factors that they can consider to optimize their Airbnb experiences in Singapore.
+
+#### **_Methods_**
+
+1. Data Source: the open-source dataset was obtained from Kaggle, named “Singapore Airbnb.” The original source is http://insideairbnb.com/get-the-data.html. The data was collected on August 18, 2019. Variables in this dataset include room name, room ID, host name, host ID, neighborhood group (region), neighborhood (subregion), latitude, longitude, room type (entire home/apt, private room, shared room), price (S$ per night), minimum nights of stay, availability in 365 days, number of reviews, last review date, reviews per month, and calculated host list count (total listings per host).
+2. Data Cleaning & Exploration: We first identified missing values for each variable in the dataset. We then explored the data with plots to examine the distribution of variables of interest and made appropriate transformation accordingly.
+3. Data Analysis & Visualization: We first summarized descriptive statistics of neighborhood group distribution, price, minimum nights of stay, availability per 365 days, number of review, and listings per host for each room type. We also visualized the spatial distribution of all available listings in Singapore by data collection date to allow customers to identify availability in the region of their interest with a rough sense of the price. As price and room type are usually one of the most considered factors, we particularly visualized price difference across five regions in Singapore and proportion of room type among available listings for easier comparison.
+4. Shiny App Design: We use Shiny’s image and plot interaction features to provide users direct interative experience.By filtering the neighbourhood, price and room type requirements, the plots and the table present users general information of listing hosts that satisfy those requirements and represent the specific price of the rentals. Check out the [app](https://leahchen.shinyapps.io/group_project/)!
+5. Modeling: In order to model the pricing, we took log transformation of price. We choose xgboost model. XGBoost is an implementation of gradient boosted decision trees designed for speed and performance.Boosting is an ensemble technique where new models are added to correct the errors made by existing models. Models are added sequentially until no further improvements can be made.Gradient boosting is an approach where new models are created that predict the residuals or errors of prior models and then added together to make the final prediction.
+6. Video: We made a short screencast to introduce our project and the functionality of this Shiny app. Click [here](https://youtu.be/q0rg5LsY59c) to watch!
+
+### Data Analysis
+
+#### **_Exploratory Analysis_**
+
+We first conducted an EDA. Two missing values for "listing name" were found, and "reviews per month" was entirely missing. Since we would not be using these variables, we did not fix it. "Listings per Host" had 2,758 missing values out of 7,907, so we decided to use existing values for visualization and modeling. Price was the outcome varible of interest and would be used in the final modeling. The distribution asvery righ-skewed, so we made log-transformation for better visualization and model fit.
+
+```{r, warning=FALSE, message=FALSE}
+coln <- cols(
+  id = col_integer(),
+  name = col_character(),
+  host_id = col_integer(),
+  host_name = col_character(),
+  neighbourhood_group = col_character(),
+  neighbourhood = col_character(),
+  latitude = col_double(),
+  longitude = col_double(),
+  room_type = col_character(),
+  price = col_integer(),
+  minimum_nights = col_integer(),
+  number_of_reviews = col_integer(),
+  last_review = col_date(format = ""),
+  reviews_per_month = col_double(),
+  calculated_host_listings_count = col_integer(),
+  availability_365 = col_integer()
+)
+listings <- read_csv("https://raw.githubusercontent.com/JIngyichen0701/Group_Final_Project/master/listings.csv",col_types = coln)
+colnames(listings)[5]<-'Neighbourhood Group'
+colnames(listings)[6]<-'Neighbourhood'
+colnames(listings)[7]<-'Latitude'
+colnames(listings)[8]<-'Longitude'
+colnames(listings)[9]<-'Room Type'
+colnames(listings)[10]<-'Price'
+colnames(listings)[11]<-'Minimum Nights'
+colnames(listings)[12]<-'Number of Reviews'
+colnames(listings)[13]<-'Reviews per Month'
+colnames(listings)[14]<-'Listings per Host'
+colnames(listings)[15]<-'Availability per 365'
+listings$`Room Type` <- as.factor(listings$`Room Type`)
+listings$`Neighbourhood Group` <- as.factor(listings$`Neighbourhood Group`)
+listings$Neighbourhood <- as.factor(listings$Neighbourhood)
+describe(listings)
+summary(listings)
+
+listings$Log_Price = log10(listings$Price)
+listings %>% ggplot(aes(x=Price)) +
+  geom_histogram(bins=10)
+
+listings %>% ggplot(aes(x=`Minimum Nights`)) +
+  geom_histogram(bins=10)
+
+listings %>% ggplot(aes(x=`Number of Reviews`)) +
+  geom_histogram(bins=10)
+
+listings %>% ggplot(aes(x=`Listings per Host`)) +
+  geom_histogram(bins=10)
+
+listings %>% ggplot(aes(x=`Availability per 365`)) +
+  geom_histogram(bins=10)
+
+listings$Log_Price = log10(listings$Price)
+```
+
+
+We summarized the descriptive distribution of room types available in each region, as well as descriptive statistics of price per night, minimum nights of stay, availability per 365 days, number of reviews, and listings for each room type. We presented this in a table format. 
+
+Singapore is divided into five regions for developments, namely, the Central, West, North, North-East and East regions:
+
+	_Central Region_: Singapore’s main prime metropolitan area, of which owning any private residential property here would consider one as a ‘high net-worth individual’. This is largely due to its locational attributes, its close proximity to the central business district (CBD), the quality of the properties, as well as the high property values as compared to the rest of the regions.
+
+	_West Region_: the largest region in terms of land area and is the second most populous region after the Central Region. It is the home to a majority of Singapore's heavy industries, mainly the petrochemical industry.
+
+	_North Region_: the second largest region in terms of land area. The region is home to several attractions, namely the Singapore Zoo, Night Safari and River Safari.
+
+	_North-East Region_: the most densely populated region. Located within the North-Eastern Islands planning area, Pulau Ubin is a popular tourist attraction with both local and foreign visitors visiting the island as it is one of the last rural areas in Singapore, with an abundance of natural flora and fauna.
+
+	_East Region_: the second most densely populated among the five, and has the smallest land area. Manufacturing makes up majority of the economical activity in the region.
+	
+Most listings are located in Central region where major commercial zones and tourism attractions are. 90% of entire home/apt type is located in the Central. North or North-East region tends to have more choices for private room, and for customer who prefer to visit natural landscape in Singapore . The average price is (Singapore dollars, or S$) S$227/night for entire/home/apt, S$111/night for private room, and S$66/night for shared room. Private room type requires at least 21 days of stay, the longest among three types. Shared room has a much shorter minimum stay of 4 days. For a longer than half-month travel, entire home/apt would be better choices for privacy and comfort during stay, depending on budget. Entire home/apt has most availability in a year, but all room types has availability up to over 100 days. In particular, entire home/apt and private room have over 200 days availability.
+
+```{r, warning=FALSE, message=FALSE, results = 'asis'}
+summary1 <- listings %>% select(`Neighbourhood Group`, `Room Type`)
+summary2 <- listings %>% select(`Room Type`, Price, `Minimum Nights`, `Availability per 365`, `Number of Reviews`, `Listings per Host`)
+
+control1 <- tableby.control(
+  test = F,
+  total = T,
+  numeric.stats = c("meansd", "medianq1q3", "range"),
+  cat.stats = "countpct",
+  stats.labels = list(
+    meansd = "Mean (SD)",
+    medianq1q3 = "Median (Q1, Q3)",
+    range = "Min - Max"))
+ 
+table1 <- tableby(summary1$`Room Type` ~ .,
+  data = summary1,
+  control = control1,)
+ 
+summary(table1,
+  title = " ")
+
+control2 <- tableby.control(
+  test = F,
+  total = T,
+  numeric.stats = c("meansd", "medianq1q3", "range"),
+  cat.stats = "count",
+  stats.labels = list(
+    meansd = "Mean (SD)",
+    medianq1q3 = "Median (Q1, Q3)",
+    range = "Min - Max"))
+ 
+ 
+table2 <- tableby(summary2$`Room Type` ~ .,
+  data = summary2,
+  control = control2,
+  digits=0)
+ 
+summary(table2,
+  title = " ")
+```
+
+#### **_Data Visualization_**
+
+We first visualized the spatial distribution of all available listings in Singapore by data collection date to allow customers to identify availability in the region of their interest with a rough sense of the price. The first graph overlays the distribution of listings in each region on Singapore map to help customers locate listings of interest. The second graph contains more detailed information of region and price. We use color to distinguish regions and point size for price.
+
+Most listings concentrate in the Central region where major commercial zones and tourism attractions are, very few in the North region. Most expensive ones are also in these two regions. North-East and East regions have similar price and count distribution, most of which cost less than S$5,000.
+
+```{r, echo = FALSE, warning=FALSE}
+ima <- image_read("https://raw.githubusercontent.com/JIngyichen0701/Group_Final_Project/master/sin.png")
+par(xpd = F, mar = par()$mar + c(0,0,0,7))
+  plot(x=c(103.6,104),y=c(1.244,1.455),type='n', xlab="Longitude", ylab="Latitude", box=FALSE)
+  lim <- par()
+  rasterImage(ima, lim$usr[1], lim$usr[3], lim$usr[2], lim$usr[4])
+  grid() 
+points(listings[listings$`Neighbourhood Group`=='Central Region',]$Longitude, listings[listings$`Neighbourhood Group`=='Central Region',]$Latitude,cex=0.4,pch=19,col='firebrick3')
+
+points(listings[listings$`Neighbourhood Group`=='North Region',]$Longitude, listings[listings$`Neighbourhood Group`=='North Region',]$Latitude,cex=0.4,pch=19,col='khaki1')
+
+points(listings[listings$`Neighbourhood Group`=='North-East Region',]$Longitude, listings[listings$`Neighbourhood Group`=='North-East Region',]$Latitude,cex=0.4,pch=19,col='olivedrab3')
+
+points(listings[listings$`Neighbourhood Group`=='East Region',]$Longitude, listings[listings$`Neighbourhood Group`=='East Region',]$Latitude,cex=0.4,pch=19,col='sandybrown')
+
+points(listings[listings$`Neighbourhood Group`=='West Region',]$Longitude, listings[listings$`Neighbourhood Group`=='West Region',]$Latitude,cex=0.4,pch=19,col='mediumseagreen')
+
+legend(x="right",
+        c("Central Region","North Region","North-East Region","East Region", "West Region"), 
+        col=c("firebrick3","khaki1","olivedrab3","sandybrown","mediumseagreen"), 
+        pch=19, cex=0.8 ,bty="n",merge=FALSE, inset=c(-0.40,0), xpd = TRUE, title="Neighbourhood Group")
+
+listings %>%
+  filter(Latitude, Longitude, `Neighbourhood Group`== `Neighbourhood Group` & !is.na(`Neighbourhood Group`)) %>%
+  ggplot(aes(Longitude, Latitude, size=Price)) +
+  geom_point(aes(color=`Neighbourhood Group`), alpha=0.5) +
+  theme_bw() +
+  theme(panel.grid.major = element_blank(),
+panel.background = element_blank(), panel.border = element_blank(), axis.line = element_line(colour = "white")) + 
+  scale_colour_brewer("Neighborhood Group", palette="RdYlGn")
+```
+
+
+As price and room type are usually one of the most considered factors, we particularly visualized price difference across five regions in Singapore using boxplots and proportion of room type among available listings for easier comparison using a pie chart.
+
+Among all listings in Singapore, 52% is entrie home/apt type and 43% is private room. Only 5% was shared room type. The price in the Central is the highest, which makes sense as most commercial and entertainment activities are concentrated in that region. It’s interesting that prices of North and North-East region is the cheapest, while safari, zoos, and other natural attractions are located. So for customers who are more interested in natural landscape than modern entertainment, the North/North-East region would be the best choice because of vicinity to tourist attractions and a cheaper price.
+
+```{r,echo = FALSE, warning=FALSE}
+listings %>%
+  ggplot(aes(`Neighbourhood Group`, Log_Price, fill = `Neighbourhood Group`)) + 
+  geom_boxplot(alpha=0.7) +
+  theme_bw() +
+  theme(panel.grid.major = element_blank(),
+panel.background = element_blank(), panel.border = element_blank(), axis.line = element_line(colour = "white")) + 
+  scale_fill_brewer("Neighborhood Group", palette="RdYlGn")
+
+a<-t(table(listings$`Room Type`))
+value<-as.data.frame(a)
+
+blank_theme <- theme_minimal()+
+  theme(
+  axis.title.x = element_blank(),
+  axis.title.y = element_blank(),
+  panel.border = element_blank(),
+  panel.grid=element_blank(),
+  axis.ticks = element_blank(),
+  plot.title = element_text(size=14, face="bold")
+  )
+
+value %>% ggplot(aes(x="", y=Freq, fill=Var2)) +
+  geom_bar(width = 1, stat = "identity") + 
+  coord_polar("y", start=0) + 
+  guides(fill=guide_legend(title="room type")) +
+  scale_fill_brewer(palette="RdYlGn") + 
+  blank_theme + 
+  theme(axis.text.x=element_blank()) +
+  geom_text(aes(y = c(Freq), 
+               label = percent(Freq/7907)), size=5, position = position_dodge(2), hjust=0.5)
+```
+
+Finally, we created three scatterplots to show associatin of rental price with number of reviews, listings per host, abd availability per 365 days. Overall, shared room is in general the cheapest, and entire home/apt is the most expensive type. Number of reviews can partly tell how many customers have chosen this place. More listings per host may infer professionalism of host. Availability per 365 days can also somehow tell whether the host is a professional Airbnb host, like more avalability meaning more management required. For entire home/apt, the price tends to be cheaper with more number of reviews, listings per host, or availability in 365 days, but reverse for private room. Shared room type has limited availability, so these factors may not play a role in its pricing. 
+
+```{r}
+listings %>%
+  ggplot(aes(`Number of Reviews`, Log_Price, color = `Room Type`)) + 
+  geom_point(alpha=0.7) +
+  scale_colour_brewer("Room Type", palette="RdYlGn") +
+  theme_bw() +
+  theme(panel.grid.major = element_blank(),
+panel.background = element_blank(), panel.border = element_blank(), axis.line = element_line(colour = "white")) + 
+  scale_fill_brewer("Neighborhood Group", palette="RdYlGn")
+
+listings %>%
+  ggplot(aes(`Listings per Host`, Log_Price, color = `Room Type`)) + 
+  geom_point() + 
+  theme_bw() +
+  theme(panel.grid.major = element_blank(),
+panel.background = element_blank(), panel.border = element_blank(), axis.line = element_line(colour = "white")) + 
+  scale_colour_brewer("Room Type", palette="RdYlGn") 
+
+listings %>%
+  ggplot(aes(`Availability per 365`, Log_Price, color = `Room Type`)) + 
+  geom_point() +
+  theme_bw() +
+  theme(panel.grid.major = element_blank(),
+panel.background = element_blank(), panel.border = element_blank(), axis.line = element_line(colour = "white")) + scale_colour_brewer("Room Type", palette="RdYlGn")
+```
+
+
+#### **_Shiny App_**
+
+UI function:
+
+Based on results of data exploration and visualization, we decided to include the following variables in the user interface as modifiable features: region, neighbourhood, price and room type. This user interface allows users to choose specific region and neighbourhood, room type and also the maximum budget thay could afford for the listing. In ths ui function, we first designed a drop-down menu to select region and neighbourhood under the specified region, and room type. This control panel was place in the side panel on the left, and the main panel was left for interactions/responses.
+
+```{r, eval=FALSE}
+listings2 <- listings[,c("host_name","calculated_host_listings_count","room_type","name", "number_of_reviews", "price")]
+ui <- fluidPage(
+  fluidRow(
+    column(6, 
+           "Choose your place",
+           selectInput("Region", label = "Select a Region",
+                       choices = as.list(levels(listings$neighbourhood_group))),
+           selectInput("Neighbourhood", label = "Select a neighbourhood",
+                       choices = as.list(levels(listings$neighbourhood)))
+    ),
+    column(6, 
+           sliderInput("Price", "Select a Maximum Price:", 1, 500, 200),
+           selectInput("Type", label = "Select a Room Type",
+                       choices = as.list(levels(listings$room_type)))
+    )),
+    fluidRow(
+      column(6, plotOutput("scatterPlot1")),
+      column(6, plotOutput("Plot2",click = "plot1_click",brush = brushOpts(
+        id = "plot1_brush")),
+        htmlOutput("select_price"),
+             tableOutput("table"))),
+  )
+```
+
+Server function 1: 
+In the first server function, we rendered a scatterplot that shows the neighborhood distribution of available listings according to selected price and region. Larger circle represents higher price.
+
+```{r, eval=FALSE}
+server <- function(input, output){
+    output$scatterPlot1 = renderPlot({
+      listings%>% filter(neighbourhood_group %in% input$Region & price < input$Price)%>% 
+        ggplot(aes(latitude, longitude, color=neighbourhood, size=price)) +
+        geom_point(alpha = 0.5) +
+        xlab("Latitude") +
+        ylab("Longitude")
+    })
+
+```
+
+Server function 2:
+In the second server funtion, we added a horizontal bar chart. Based on customers' inputs in room type and neighborhood filter, the chart will show individual price for each  available host.
+
+```{r, eval=FALSE}
+    output$Plot2 = renderPlot({
+       listings%>% filter(neighbourhood %in% input$Neighbourhood & price < input$Price & room_type %in% input$Type)%>% 
+        ggplot(aes(host_name,price,colour="green")) +
+        coord_flip()+
+        geom_bar(stat = "identity") +
+        xlab("")
+
+    })
+
+```
+
+Server function 3:
+The thrid server function was designed to provide detailed information based on customers' inputs in the previous two server functions. We used nearPoints() function to allow users to click on the chart. Based on the click point, a text output will pop up below to show the value of x axis, which is the price users selected. Another output is in table format. It rendered the first 5 hosts that best match the price  users click. For example, if the user clicks on the plot with x=36, equivalent to price=S$ 36/night, the app will show the user the best matched 5 hosts and their listing information including host name, house name, number of reviews, room type, and the total number of listings of each host.
+
+```{r, eval=FALSE}
+ # Print the selected price value
+output$select_price <- renderText({
+      if (is.null(input$plot1_click$x)) return("")
+      else {
+        name <- round(input$plot1_click$x)
+        HTML("The Price You've selected <code>", name, "</code>",
+             "<br><br>Here are the first 5 hosts that ",
+             "match that category:")
+      }
+    })
+    
+    # Print the table of details
+    output$table <- renderTable({
+        keeprows<- round(input$plot1_click$x) == as.numeric(listings$price)
+        head(listings2[keeprows, ], 5,)
+        })
+
+ }
+  shinyApp(ui = ui, server = server)
+```
+
+#### **_Modeling_**
+
+In order to model the pricing, we took log transformation of price. We chose xgboost model, an implementation of gradient boosted decision trees designed for speed and performance. Boosting is an ensemble technique where new models are added to correct the errors made by existing models. Models are added sequentially until no further improvements can be made. Gradient boosting is an approach where new models are created that predict the residuals or errors of prior models and then added together to make the final prediction. It is called gradient boosting because it uses a gradient descent algorithm to minimize the loss when adding new models. 
+
+After grid search to tune parameters, we found the best parameter which have both low train error and test error. The optimized parameters were max.depth=4, objective = reg:linear, eval_metric = rmse, eta=0.3, nrounds=100, data = train_matrix, watchlist = watchlist, lambda= 0.2, gamma = 0.1， colsample_bytree=0.3, min_child_weight=25, subsample=0.7. When using Root mean square error to evaluate the accuracy, we got an rmse of 0.48 on test data set. The final graph showed the relative importance of each feature that influences price. Based on the modeling, the most important features are room tpye, latitude, availability, minimum nights of stay, longitute, number of reviews and neighborhood.
+
+```{r}
+housing <- read.csv("https://raw.githubusercontent.com/JIngyichen0701/Group_Final_Project/master/listings.csv")
+housing<-housing[,-c(1,2,3,13,14)]
+housing<-housing[,-c(1)]
+housing<-housing[-which(housing$minimum_nights>365),]
+
+set.seed(123)
+smp_siz = floor(0.7*nrow(housing))
+train_ind = sample(seq_len(nrow(housing)),size = smp_siz)  # Randomly identifies therows equal to sample size ( defined in previous instruction) from  all the rows of Smarket dataset and stores the row number in train_ind
+train =housing[train_ind,] #creates the training dataset with row numbers stored in train_ind
+test=housing[-train_ind,] 
+train$minimum_nights<-scale(train$minimum_nights)
+train$number_of_reviews<-scale(train$number_of_reviews)
+
+train$calculated_host_listings_count<-scale(train$calculated_host_listings_count)
+train$availability_365<-scale(train$availability_365)
+
+test$minimum_nights<-scale(test$minimum_nights)
+test$number_of_reviews<-scale(test$number_of_reviews)
+test$calculated_host_listings_count<-scale(test$calculated_host_listings_count)
+test$availability_365<-scale(test$availability_365)
+
+library(xgboost)
+library(DMwR)
+library(magrittr)
+library(Matrix)
+trainm <- sparse.model.matrix(price ~ .-1, data = train)
+train_label <- log(train[,"price"]+1)
+train_matrix <- xgb.DMatrix(data = as.matrix(trainm), label = train_label)
+testm <- sparse.model.matrix(price~.-1, data = test)
+test_label <- log(test[,"price"]+1)
+test_matrix <- xgb.DMatrix(data = as.matrix(testm), label = test_label)
+#searchGridSubCol <- expand.grid(subsample = c(0.7), 
+  #                              colsample_bytree = c(0.3),
+   #                             max_depth = c(4),
+    #                            min_child = c(10,15,20,25,30), 
+     #                           eta = c(0.1,0.01,0.3,0.2)
+#)
+watchlist <- list(train = train_matrix, test = test_matrix)
+
+#searchGridSubCol <- expand.grid(subsample = c(0.7), 
+ #                               colsample_bytree = c(0.3),
+  #                              max_depth = c(4,3,2,5,6),
+   #                             min_child = c(25), 
+    #                            eta = c(0.1,0.3,0.5,0.8,1)
+#)
+ntrees <- 100
+#rmseErrorsHyperparameters <- apply(searchGridSubCol, 1, function(parameterList){
+  
+  #Extract Parameters to test
+#  currentSubsampleRate <- parameterList[["subsample"]]
+ # currentColsampleRate <- parameterList[["colsample_bytree"]]
+  #currentDepth <- parameterList[["max_depth"]]
+ # currentEta <- parameterList[["eta"]]
+#  currentMinChild <- parameterList[["min_child"]]
+  #xgboostModelCV <- xgb.cv(data =  train_matrix, nrounds = ntrees, nfold = 10, showsd = TRUE, 
+   #                        metrics = "rmse", verbose = TRUE, "eval_metric" = "rmse",
+    #                       "objective" = "reg:linear", "max.depth" = currentDepth, "eta" = currentEta,      #                         
+      ##                     "subsample" = currentSubsampleRate, "colsample_bytree" = currentColsampleRate
+        #                   , print_every_n = 10, "min_child_weight" = currentMinChild, booster = "gbtree",
+         #                  early_stopping_rounds = 10)
+#  xvalidationScores <- as.data.frame(xgboostModelCV$evaluation_log)
+#  rmse <- tail(xvalidationScores$test_rmse_mean, 1)
+#  trmse <- tail(xvalidationScores$train_rmse_mean,1)
+#  output <- return(c(rmse, trmse, currentSubsampleRate, currentColsampleRate, currentDepth, #currentEta, currentMinChild))})
+
+#output <- as.data.frame(t(rmseErrorsHyperparameters))
+#varnames <- c("TestRMSE", "TrainRMSE", "SubSampRate", "ColSampRate", "Depth", "eta", "currentMinChild")
+#names(output) <- varnames
+#plot(output$TestRMSE)
+#head(output)
+#output[which.min(output$TestRMSE),]
+#output[which.min(output$TrainRMSE),]
+bst_model2 <- xgb.train(max.depth=4,objective = "reg:linear",
+                        eval_metric = "rmse", 
+                        eta=0.3, 
+                        nrounds=100,
+                        data = train_matrix,
+                        watchlist = watchlist,
+                        lambda= 0.2,
+                        gamma = 0.1,
+                        colsample_bytree=0.3,
+                        min_child_weight=25, 
+                        subsample=0.7)
+bst_model2$evaluation_log
+p <- predict(bst_model2, newdata = test_matrix)
+sum((p-log(test$price+1))^2)
+plot(bst_model2$evaluation_log$test_rmse)
+plot(bst_model2$evaluation_log$train_rmse)
+#xgb.importance(bst_model2)
+
+library(igraph)
+xgb.plot.deepness(bst_model2)
+imp <- xgb.importance(colnames(train_matrix), model = bst_model2)
+xgb.plot.importance(imp[1:10,])
+```
+
+
